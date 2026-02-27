@@ -28,7 +28,8 @@
   },
   "files": [
     "dist/",
-    "verybot.js"
+    "verybot.js",
+    "scripts/postinstall-ui-install.mjs"
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall-ui-install.mjs",

@@ -34,6 +34,7 @@ When the user corrects your approach during a session, immediately record the ru
 - Public-facing onboarding docs should explicitly point model configuration to `Settings -> Agent`.
 - Public-facing onboarding docs should explicitly mention that the Control UI is mobile-friendly and can be used from phones when reachable via localhost/LAN/internet URLs.
 - Public-facing value proposition sections (for example README "Why") should be benefit-first and explicit about user outcomes, not just feature lists.
+- For npm package validation, simulate real user execution paths directly (for example `npx <pkg>` / installed CLI usage) instead of scaffolding throwaway projects unless the user explicitly asks for that flow.
 - Prompt guidance for TTS must be text-first: only invoke the `speak` tool when the user explicitly asks for audio/read-aloud.
 - Bootstrap the default team in runtime boot only (not in request/session/tool paths).
 - Lazy bootstrap helper `ensureTeamWhenEmpty` is zero-argument and default-only, intended for boot-time initialization.
