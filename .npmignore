@@ -1,0 +1,9 @@
+src/
+ui/
+*.test.ts
+*.test.js
+*.test.d.ts
+tsconfig.json
+vitest.config.ts
+.env*
+CLAUDE.md

@@ -1,0 +1,102 @@
+{
+  "name": "verybot",
+  "version": "0.1.7",
+  "description": "Multi-channel AI agent framework with Telegram, Discord, Slack, and WhatsApp support",
+  "type": "module",
+  "license": "MIT",
+  "author": "charlie",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/charlie0077/verybot.git"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "telegram",
+    "discord",
+    "slack",
+    "whatsapp",
+    "llm",
+    "chatbot",
+    "mcp"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "verybot": "verybot.js"
+  },
+  "files": [
+    "dist/",
+    "verybot.js"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall-ui-install.mjs",
+    "dev:lan": "sh -c '(npm run dev:backend) & (cd ui && npm run dev -- --host 0.0.0.0 --port 10000) & wait'",
+    "dev": "sh -c '(npm run dev:backend) & (cd ui && npm run dev) & wait'",
+    "dev:backend": "tsx watch src/index.ts",
+    "build": "rm -rf dist && tsc && find dist -name '*.test.js' -o -name '*.test.d.ts' | xargs rm -f && cd ui && vite build --outDir ../dist/control-ui",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build && npm run test",
+    "publish:patch": "npm version patch && npm publish",
+    "publish:minor": "npm version minor && npm publish",
+    "publish:major": "npm version major && npm publish"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.38",
+    "@ai-sdk/deepseek": "^2.0.18",
+    "@ai-sdk/elevenlabs": "^2.0.18",
+    "@ai-sdk/google": "^3.0.22",
+    "@ai-sdk/groq": "^3.0.22",
+    "@ai-sdk/mistral": "^3.0.19",
+    "@ai-sdk/openai": "^3.0.26",
+    "@ai-sdk/openai-compatible": "^2.0.28",
+    "@ai-sdk/togetherai": "^2.0.31",
+    "@ai-sdk/xai": "^3.0.50",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@openai/codex": "^0.101.0",
+    "@slack/bolt": "^4.6.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "ai": "^6.0.75",
+    "ai-sdk-provider-claude-code": "^3.4.0",
+    "ai-sdk-provider-codex-cli": "^1.0.5",
+    "better-sqlite3": "^12.6.2",
+    "chokidar": "^5.0.0",
+    "codemirror": "^6.0.2",
+    "croner": "^10.0.1",
+    "discord.js": "^14.25.1",
+    "grammy": "^1.39.3",
+    "markdown-it": "^14.1.1",
+    "node-edge-tts": "^1.2.10",
+    "node-llama-cpp": "^3.15.1",
+    "octokit": "^5.0.5",
+    "openai": "^6.18.0",
+    "playwright": "^1.58.2",
+    "playwright-extra": "4.3.6",
+    "puppeteer-extra-plugin-stealth": "2.11.2",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.34.5",
+    "sqlite-vec": "^0.1.7-alpha.2",
+    "twitter-api-v2": "^1.29.0",
+    "vercel-minimax-ai-provider": "^0.0.2",
+    "winston": "^3.19.0",
+    "ws": "^8.19.0",
+    "zhipu-ai-provider": "^0.2.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^25.2.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "@openai/codex": "^0.101.0"
+  }
+}
