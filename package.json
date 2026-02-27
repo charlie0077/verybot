@@ -1,6 +1,6 @@
 {
   "name": "verybot",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Multi-channel AI agent framework with Telegram, Discord, Slack, and WhatsApp support",
   "type": "module",
   "license": "MIT",
