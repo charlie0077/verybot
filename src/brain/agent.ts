@@ -1013,6 +1013,12 @@ export class Agent {
 
     if (!runProvider.trim() || !runModelId.trim()) {
       logger.warn(`[${this.sessionLabel(sessionKey)}] ${MODEL_NOT_CONFIGURED_REPLY}`);
+      emit("chat", {
+        sessionKey,
+        agentId: effectiveAgentId,
+        state: "final",
+        message: { role: "assistant", content: MODEL_NOT_CONFIGURED_REPLY },
+      });
       return MODEL_NOT_CONFIGURED_REPLY;
     }
 

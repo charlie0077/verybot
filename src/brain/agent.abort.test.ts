@@ -7,6 +7,8 @@ import type { Config } from "../config.js";
 import { ConfigStore } from "../config/store.js";
 import { TeamStore } from "../teams/store.js";
 import { DEFAULT_TEAM_ID } from "../config/agent-config.js";
+import { on } from "../events.js";
+import type { Channel } from "../channels/types.js";
 
 const TEST_GATEWAY_PORT = 28789;
 
@@ -62,10 +64,82 @@ describe("Agent abort behavior", () => {
       tools: {},
       dataDir,
     });
+    const sessionKey = "default:gateway:model-required";
+    const chatEvents: Array<{
+      sessionKey: string;
+      state: string;
+      message?: { role: string; content: string };
+    }> = [];
+    const unsubscribe = on("chat", (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      const candidate = payload as {
+        sessionKey?: string;
+        state?: string;
+        message?: { role?: string; content?: string };
+      };
+      if (candidate.sessionKey !== sessionKey) return;
+      chatEvents.push({
+        sessionKey: candidate.sessionKey ?? "",
+        state: candidate.state ?? "",
+        message:
+          candidate.message && typeof candidate.message.content === "string"
+            ? {
+                role: candidate.message.role ?? "",
+                content: candidate.message.content,
+              }
+            : undefined,
+      });
+    });
 
-    const reply = await agent.handleGatewayMessage("default:gateway:model-required", "hello");
-    expect(reply).toContain("Model is not configured.");
-    expect(reply).toContain("Settings -> Agent");
+    try {
+      const reply = await agent.handleGatewayMessage(sessionKey, "hello");
+      expect(reply).toContain("Model is not configured.");
+      expect(reply).toContain("Settings -> Agent");
+      expect(chatEvents).toContainEqual({
+        sessionKey,
+        state: "final",
+        message: expect.objectContaining({
+          role: "assistant",
+          content: expect.stringContaining("Model is not configured."),
+        }),
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("sends setup guidance to channel users when global model is not configured", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "verybot-agent-channel-model-required-test-"));
+    const configStore = new ConfigStore(dataDir);
+    const agent = new Agent({
+      config: makeUnconfiguredModelConfig(),
+      configStore,
+      tools: {},
+      dataDir,
+    });
+    const channelSend = vi.fn(async () => undefined);
+    const channel: Channel = {
+      name: "test-channel",
+      start: async () => undefined,
+      stop: async () => undefined,
+      send: channelSend,
+    };
+
+    await agent.handleMessage(
+      {
+        channelType: "telegram",
+        channelId: "123",
+        userId: "u1",
+        teamId: "default",
+        text: "hello",
+      },
+      channel,
+    );
+
+    expect(channelSend).toHaveBeenCalledWith(
+      "123",
+      expect.stringContaining("Model is not configured."),
+    );
   });
 
   it("does not synthesize a default team when no team store is configured", () => {
