@@ -17,7 +17,7 @@ export default defineConfig({
     port: 10000,
     proxy: {
       '/ws': {
-        target: `http://localhost:${GATEWAY_PORT}`,
+        target: `http://127.0.0.1:${GATEWAY_PORT}`,
         ws: true,
       },
     },
