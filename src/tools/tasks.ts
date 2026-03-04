@@ -1,10 +1,11 @@
 import { tool } from "ai";
 import { z } from "zod";
-import type { TaskStore } from "../tasks/store.js";
+import { type TaskStore, resolveConsensusBarrier } from "../tasks/store.js";
+import type { TeamStore } from "../teams/store.js";
 import {
   TASK_PRIORITIES,
-  DEFAULT_TASK_STATUSES,
   MAX_TASK_COMMENT_LENGTH,
+  resolveStatuses,
   type Task,
   type TaskComment,
   type TaskStatusConfig,
@@ -25,6 +26,46 @@ export interface CreateTaskToolsOptions {
   requireClaimedByForStatusChange?: string;
   /** Actor label used for task_create/task_update writes from this tool set. */
   updatedBy?: string;
+  /** TeamStore reference needed for consensus barrier checks. */
+  teamStore?: TeamStore;
+  /** Current agent's name (for vote comments). */
+  agentName?: string;
+}
+
+/** Shared vote comment + barrier resolution logic used by both task_update and task_vote. */
+function recordVoteAndCheckBarrier(
+  taskStore: TaskStore,
+  taskId: string,
+  agentId: string,
+  agentDisplayName: string,
+  existingStatus: string,
+  votedStatus: string,
+  configuredStatuses: TaskStatusConfig[],
+  teamStore: TeamStore | undefined,
+  teamId: string,
+  result?: string,
+): { transition: string | null; noTeamStore: boolean } {
+  const currentStatusConfig = configuredStatuses.find((s) => s.key === existingStatus);
+  const rawConsensus = currentStatusConfig?.consensus;
+  const consensus = rawConsensus === "unanimous" ? "unanimous" : "none";
+
+  if (consensus !== "none") {
+    const voteComment = result
+      ? `[Vote] ${agentDisplayName} → ${votedStatus}: ${result}`
+      : `[Vote] ${agentDisplayName} → ${votedStatus}`;
+    taskStore.addComment(taskId, voteComment, { actor: agentId });
+  }
+
+  if (!teamStore) {
+    return { transition: null, noTeamStore: true };
+  }
+
+  const subscribers = teamStore.getSubscribersForStatus(teamId, existingStatus);
+  const transition = resolveConsensusBarrier(
+    taskStore, taskId, existingStatus,
+    subscribers, consensus, currentStatusConfig?.disagreementTransition,
+  );
+  return { transition, noTeamStore: false };
 }
 
 function formatClaimedAt(claimedAt: number | null): string {
@@ -115,13 +156,12 @@ export function createTaskTools(
 
   // Build dynamic status keys from team config or fall back to global defaults.
   // Defensive fallback: some persisted teams may still have empty status lists.
-  const configuredStatuses = statuses && statuses.length > 0 ? statuses : DEFAULT_TASK_STATUSES;
+  const configuredStatuses = resolveStatuses(statuses);
   const createStatusKeys = configuredStatuses.map((s) => s.key);
   const listAndUpdateStatusKeys = [...createStatusKeys, "archived"];
   const defaultCreateStatus = createStatusKeys.includes(DEFAULT_CREATE_STATUS_KEY)
     ? DEFAULT_CREATE_STATUS_KEY
-    : configuredStatuses[0]?.key
-    ?? DEFAULT_TASK_STATUSES[0]!.key;
+    : configuredStatuses[0]!.key;
 
   const createStatusDesc = createStatusKeys.join(", ");
   const statusDesc = listAndUpdateStatusKeys.join(", ");
@@ -181,11 +221,49 @@ export function createTaskTools(
 
       const statusChanged = status !== undefined && status !== existing.status;
       const requiredClaimOwner = options.requireClaimedByForStatusChange;
-      if (statusChanged && requiredClaimOwner && existing.claimedBy !== requiredClaimOwner) {
-        const claimOwner = existing.claimedBy ?? "none";
-        return `Task status update blocked: claimed by ${claimOwner}`;
+
+      // Subscription workers: route status changes through unified vote+barrier flow
+      if (statusChanged && requiredClaimOwner) {
+        // Validate claim BEFORE applying any updates
+        const voted = taskStore.completeClaim(id, requiredClaimOwner, existing.status, status!);
+        if (!voted) {
+          return `Status change failed: no active claim for this agent on task ${id} in status "${existing.status}"`;
+        }
+
+        // Apply non-status updates (if any) — only after claim is validated.
+        // skipClaimCleanup: true prevents deleting the vote we just recorded.
+        const hasNonStatusUpdates = [title, description, assignee, priority, needsHumanReview].some((v) => v !== undefined);
+        if (hasNonStatusUpdates) {
+          taskStore.update(id, { title, description, assignee, priority, needsHumanReview }, { updatedBy: actor, skipClaimCleanup: true });
+          // If content changed, invalidate other agents' completed votes so consensus
+          // restarts with the updated content. The current agent's vote is preserved.
+          if (title !== undefined || description !== undefined) {
+            taskStore.clearCompletedClaimsExcept(id, existing.status, requiredClaimOwner);
+          }
+        }
+
+        const agentDisplayName = options.agentName ?? requiredClaimOwner;
+        const { transition, noTeamStore } = recordVoteAndCheckBarrier(
+          taskStore, id, requiredClaimOwner, agentDisplayName,
+          existing.status, status!, configuredStatuses,
+          options.teamStore, existing.teamId,
+        );
+
+        if (noTeamStore) {
+          // No team store — fall back to direct status update (only status; non-status fields already applied above)
+          const task = taskStore.update(id, { status },
+            { clearClaimOnStatusChange: options.clearClaimOnStatusChange, updatedBy: actor, skipClaimCleanup: true });
+          if (task) emit("taskChange", { action: "updated", task });
+          if (!task) return `Task not found: ${id}`;
+          return `Task updated: [${task.id}] ${task.title} — ${task.status}`;
+        }
+        if (transition) {
+          return `Task transitioned to "${transition}" via consensus.`;
+        }
+        return `Vote recorded: ${status}. Waiting for consensus resolution.`;
       }
 
+      // Non-subscription callers: direct update
       const task = taskStore.update(
         id,
         { status, title, description, assignee, priority, needsHumanReview },
@@ -315,9 +393,49 @@ export function createTaskTools(
     },
   });
 
+  const voteTask = tool({
+    description:
+      "Vote on the next status for a task you have claimed. For unanimous consensus statuses, all agents must vote before the task transitions.",
+    inputSchema: z.object({
+      id: z.string().describe("Task ID to vote on"),
+      status: createStatusEnum.describe("Voted next status for this task"),
+      result: z.string().optional().describe("Rationale or findings for this vote"),
+    }),
+    execute: async ({ id, status: votedStatus, result }) => {
+      const existing = taskStore.getById(id);
+      if (!existing || (scoped && existing.teamId !== teamId)) return `Task not found: ${id}`;
+      if (votedStatus === existing.status) {
+        return `Vote rejected: cannot vote for the current status "${existing.status}"`;
+      }
+
+      // Record the vote
+      const agentId = options.updatedBy ?? actor;
+      const agentDisplayName = options.agentName ?? agentId;
+      const voted = taskStore.completeClaim(id, agentId, existing.status, votedStatus, result);
+      if (!voted) {
+        return `Vote failed: no active claim found for agent "${agentId}" on task ${id} in status "${existing.status}"`;
+      }
+
+      const { transition, noTeamStore } = recordVoteAndCheckBarrier(
+        taskStore, id, agentId, agentDisplayName,
+        existing.status, votedStatus, configuredStatuses,
+        options.teamStore, existing.teamId, result,
+      );
+
+      if (noTeamStore) {
+        return `Vote recorded: ${votedStatus}. No team store available for barrier resolution.`;
+      }
+      if (transition) {
+        return `Vote recorded. Consensus reached — task transitioned to "${transition}".`;
+      }
+      return `Vote recorded: ${votedStatus}. Waiting for other agents to vote.`;
+    },
+  });
+
   return {
     task_create: createTask,
     task_update: updateTask,
+    task_vote: voteTask,
     task_list: listTasks,
     task_get: getTask,
     task_delete: deleteTask,

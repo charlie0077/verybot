@@ -4,7 +4,8 @@ import { taskMethods } from "./tasks.js";
 describe("taskMethods task CRUD", () => {
   it("passes needsHumanReview filter through tasks.list", async () => {
     const list = vi.fn(() => []);
-    const taskStore = { list } as unknown as Parameters<typeof taskMethods>[0];
+    const getClaimsForTasks = vi.fn(() => new Map());
+    const taskStore = { list, getClaimsForTasks } as unknown as Parameters<typeof taskMethods>[0];
     const methods = taskMethods(taskStore);
 
     const result = await methods["tasks.list"]({ needsHumanReview: true });
@@ -32,7 +33,9 @@ describe("taskMethods task CRUD", () => {
       updatedAt: 2,
     };
     const update = vi.fn(() => task);
-    const taskStore = { update } as unknown as Parameters<typeof taskMethods>[0];
+    const getById = vi.fn(() => task);
+    const clearAllClaimsForTask = vi.fn();
+    const taskStore = { update, getById, clearAllClaimsForTask } as unknown as Parameters<typeof taskMethods>[0];
     const methods = taskMethods(taskStore);
 
     const result = await methods["tasks.update"]({ id: "task-1", title: "updated", needsHumanReview: true });

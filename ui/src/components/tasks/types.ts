@@ -47,6 +47,7 @@ export interface Task {
   needsHumanReview: boolean
   claimedBy: string | null
   claimedAt: number | null
+  claims?: TaskClaim[]
   createdAt: number
   updatedAt: number
 }
@@ -62,6 +63,20 @@ export interface TaskStatusConfig {
   key: string
   label: string
   color: string
+  /** Consensus mode: "none" (single agent, no consensus) or "unanimous" (all must vote). */
+  consensus?: "none" | "unanimous"
+  /** Status to transition to when agents disagree. Required when consensus = "unanimous". */
+  disagreementTransition?: string
+}
+
+export interface TaskClaim {
+  taskId: string
+  agentId: string
+  taskStatus: string
+  claimedAt: number
+  completedAt: number | null
+  votedStatus: string | null
+  result: string | null
 }
 
 export const DEFAULT_TASK_STATUSES: TaskStatusConfig[] = [

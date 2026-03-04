@@ -2,7 +2,7 @@ import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import type { TeamStore } from "../teams/store.js";
 import type { PromptTemplateStore } from "../prompt-templates/store.js";
-import { DEFAULT_TASK_STATUSES, type TaskStatusConfig } from "../tasks/types.js";
+import { resolveStatuses, type TaskStatusConfig } from "../tasks/types.js";
 import { REQUIRED_DONE_STATUS_KEY, validateStatusConfigs } from "../teams/status-config.js";
 import { emit } from "../events.js";
 
@@ -81,8 +81,7 @@ export function createTeamManagementTools(
   }
 
   function getEffectiveStatuses(statuses?: TaskStatusConfig[]): TaskStatusConfig[] {
-    const source = statuses && statuses.length > 0 ? statuses : DEFAULT_TASK_STATUSES;
-    return source.map((status) => ({ ...status }));
+    return resolveStatuses(statuses).map((status) => ({ ...status }));
   }
 
   function formatStatusLine(status: TaskStatusConfig): string {

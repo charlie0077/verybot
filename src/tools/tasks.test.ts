@@ -5,6 +5,15 @@ import { tmpdir } from "os";
 import { TaskStore } from "../tasks/store.js";
 import { createTaskTools } from "./tasks.js";
 import type { TaskStatusConfig } from "../tasks/types.js";
+import type { TeamStore } from "../teams/store.js";
+
+/** Minimal TeamStore mock for consensus barrier tests. */
+function mockTeamStore(subscribersMap: Record<string, string[]> = {}): TeamStore {
+  return {
+    getSubscribersForStatus: (_teamId: string, status: string) => subscribersMap[status] ?? [],
+    getTeamById: () => null,
+  } as unknown as TeamStore;
+}
 
 let tmpDir: string | null = null;
 let store: TaskStore | null = null;
@@ -76,9 +85,11 @@ describe("createTaskTools", () => {
     const claimedTask = taskStore.create({ title: "strict transition", teamId: "team-a", status: "todo" });
     taskStore.claimTaskById(claimedTask.id, "agent-a");
 
+    const ts = mockTeamStore({ todo: ["agent-a"] });
     const tools = createTaskTools(taskStore, "team-a", undefined, {
       clearClaimOnStatusChange: false,
       requireClaimedByForStatusChange: "agent-a",
+      teamStore: ts,
     });
     const taskUpdate = tools.task_update as unknown as {
       execute: (input: { id: string; status: string }) => Promise<string>
@@ -87,7 +98,6 @@ describe("createTaskTools", () => {
 
     const updated = taskStore.getById(claimedTask.id);
     expect(updated?.status).toBe("in_progress");
-    expect(updated?.claimedBy).toBe("agent-a");
   });
 
   it("blocks strict status transition when task is claimed by another agent", async () => {
@@ -95,9 +105,11 @@ describe("createTaskTools", () => {
     const claimedTask = taskStore.create({ title: "guarded transition", teamId: "team-a", status: "todo" });
     taskStore.claimTaskById(claimedTask.id, "agent-b");
 
+    const ts = mockTeamStore({ todo: ["agent-a"] });
     const tools = createTaskTools(taskStore, "team-a", undefined, {
       clearClaimOnStatusChange: false,
       requireClaimedByForStatusChange: "agent-a",
+      teamStore: ts,
     });
     const taskUpdate = tools.task_update as unknown as {
       execute: (input: { id: string; status: string }) => Promise<string>
@@ -105,7 +117,7 @@ describe("createTaskTools", () => {
     const result = await taskUpdate.execute({ id: claimedTask.id, status: "in_progress" });
 
     const unchanged = taskStore.getById(claimedTask.id);
-    expect(result).toContain("Task status update blocked");
+    expect(result).toContain("no active claim");
     expect(unchanged?.status).toBe("todo");
     expect(unchanged?.claimedBy).toBe("agent-b");
   });

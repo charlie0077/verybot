@@ -365,7 +365,13 @@
     "statusLabel": "标签",
     "statusColor": "颜色",
     "subscriptionMatrix": "状态订阅",
-    "duplicateStatusKey": "状态键重复"
+    "duplicateStatusKey": "状态键重复",
+    "consensus": "共识模式",
+    "consensusNone": "无（单代理）",
+    "consensusUnanimous": "一致（全部投票）",
+    "disagreementTransition": "分歧时 →",
+    "consensusHelp": "所有订阅代理必须投票。一致同意则转换到投票的状态。未投票的代理视为弃权。",
+    "selectStatus": "选择状态"
   },
   "promptTemplates": {
     "title": "提示词模板",

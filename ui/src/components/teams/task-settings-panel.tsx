@@ -20,7 +20,10 @@ import {
   GripVerticalIcon,
   Trash2Icon,
   CheckIcon,
+  ChevronDownIcon,
+  UsersIcon,
 } from "lucide-react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -30,6 +33,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { DEFAULT_TASK_STATUSES, type TaskStatusConfig } from "../tasks/types"
 import type { TeamConfig } from "./types"
@@ -90,13 +100,16 @@ function slugify(label: string): string {
 
 interface SortableStatusRowProps {
   status: TaskStatusConfig
+  allStatuses: TaskStatusConfig[]
   onUpdate: (updates: Partial<TaskStatusConfig>) => void
   onDelete: () => void
   isDuplicateKey: boolean
 }
 
-function SortableStatusRow({ status, onUpdate, onDelete, isDuplicateKey }: SortableStatusRowProps) {
+function SortableStatusRow({ status, allStatuses, onUpdate, onDelete, isDuplicateKey }: SortableStatusRowProps) {
   const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(false)
+  const consensusMode = status.consensus ?? "none"
   const {
     attributes,
     listeners,
@@ -112,71 +125,141 @@ function SortableStatusRow({ status, onUpdate, onDelete, isDuplicateKey }: Sorta
     opacity: isDragging ? 0.5 : 1,
   }
 
+  // Other statuses for transition dropdowns (exclude self and other unanimous statuses)
+  const otherStatuses = allStatuses.filter((s) => s.key !== status.key && s.consensus !== 'unanimous')
+
   return (
-    <div ref={setNodeRef} style={style} className="flex items-center gap-2">
-      <button
-        type="button"
-        className="cursor-grab touch-none text-muted-foreground hover:text-foreground"
-        {...attributes}
-        {...listeners}
-      >
-        <GripVerticalIcon className="size-3.5" />
-      </button>
+    <div ref={setNodeRef} style={style} className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="cursor-grab touch-none text-muted-foreground hover:text-foreground"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVerticalIcon className="size-3.5" />
+        </button>
 
-      {/* Color picker */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            className="size-6 shrink-0 rounded-full border border-border transition-colors hover:ring-2 hover:ring-border"
-            style={{ backgroundColor: status.color }}
-            aria-label={t("teams.statusColor")}
-          />
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-2" align="start">
-          <div className={cn("grid gap-1.5", PRESET_COLOR_GRID_CLASS)}>
-            {PRESET_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => onUpdate({ color: c })}
-                className={cn(
-                  "size-6 rounded-full border-2 transition-all",
-                  status.color === c
-                    ? "border-foreground scale-110"
-                    : "border-transparent hover:scale-110",
-                )}
-                style={{ backgroundColor: c }}
-              >
-                {status.color === c && (
-                  <CheckIcon className="size-3 mx-auto text-white drop-shadow-sm" />
-                )}
-              </button>
-            ))}
+        {/* Color picker */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="size-6 shrink-0 rounded-full border border-border transition-colors hover:ring-2 hover:ring-border"
+              style={{ backgroundColor: status.color }}
+              aria-label={t("teams.statusColor")}
+            />
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-2" align="start">
+            <div className={cn("grid gap-1.5", PRESET_COLOR_GRID_CLASS)}>
+              {PRESET_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => onUpdate({ color: c })}
+                  className={cn(
+                    "size-6 rounded-full border-2 transition-all",
+                    status.color === c
+                      ? "border-foreground scale-110"
+                      : "border-transparent hover:scale-110",
+                  )}
+                  style={{ backgroundColor: c }}
+                >
+                  {status.color === c && (
+                    <CheckIcon className="size-3 mx-auto text-white drop-shadow-sm" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        {/* Label */}
+        <Input
+          value={status.label}
+          onChange={(e) => onUpdate({ label: e.target.value })}
+          className="h-7 flex-1 text-xs"
+          placeholder={t("teams.statusLabel")}
+        />
+
+        {/* Consensus indicator + expand toggle */}
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className={cn(
+            "flex items-center gap-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] transition-colors",
+            consensusMode === "unanimous"
+              ? "bg-chart-1/10 text-chart-1 hover:bg-chart-1/20"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted",
+          )}
+          title={t("teams.consensus")}
+        >
+          <UsersIcon className="size-3" />
+          <ChevronDownIcon className={cn("size-3 transition-transform", expanded && "rotate-180")} />
+        </button>
+
+        {/* Delete */}
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-7 shrink-0"
+          onClick={onDelete}
+        >
+          <Trash2Icon className="size-3 text-muted-foreground" />
+        </Button>
+
+        {isDuplicateKey && (
+          <span className="text-[10px] text-destructive whitespace-nowrap">{t("teams.duplicateStatusKey")}</span>
+        )}
+      </div>
+
+      {/* Consensus settings (expandable) */}
+      {expanded && (
+        <div className="ml-8 flex flex-col gap-2 rounded-md border border-border/50 bg-muted/30 p-2.5">
+          <div className="flex items-center gap-2">
+            <Label className="text-[11px] text-muted-foreground w-24 shrink-0">{t("teams.consensus")}</Label>
+            <Select
+              value={consensusMode}
+              onValueChange={(value: "none" | "unanimous") => {
+                if (value === "none") {
+                  onUpdate({ consensus: "none", disagreementTransition: undefined })
+                } else {
+                  onUpdate({ consensus: value })
+                }
+              }}
+            >
+              <SelectTrigger className="h-7 text-xs flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{t("teams.consensusNone")}</SelectItem>
+                <SelectItem value="unanimous">{t("teams.consensusUnanimous")}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-        </PopoverContent>
-      </Popover>
 
-      {/* Label */}
-      <Input
-        value={status.label}
-        onChange={(e) => onUpdate({ label: e.target.value })}
-        className="h-7 flex-1 text-xs"
-        placeholder={t("teams.statusLabel")}
-      />
-
-      {/* Delete */}
-      <Button
-        size="icon"
-        variant="ghost"
-        className="size-7 shrink-0"
-        onClick={onDelete}
-      >
-        <Trash2Icon className="size-3 text-muted-foreground" />
-      </Button>
-
-      {isDuplicateKey && (
-        <span className="text-[10px] text-destructive whitespace-nowrap">{t("teams.duplicateStatusKey")}</span>
+          {consensusMode === "unanimous" && (
+            <>
+              <p className="text-[10px] text-muted-foreground">{t("teams.consensusHelp")}</p>
+              <div className="flex items-center gap-2">
+                <Label className="text-[11px] text-muted-foreground w-24 shrink-0">{t("teams.disagreementTransition")}</Label>
+                <Select
+                  value={status.disagreementTransition ?? undefined}
+                  onValueChange={(value) => onUpdate({ disagreementTransition: value })}
+                >
+                  <SelectTrigger className="h-7 text-xs flex-1">
+                    <SelectValue placeholder={t("teams.selectStatus")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {otherStatuses.map((s) => (
+                      <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+        </div>
       )}
     </div>
   )
@@ -304,8 +387,9 @@ export function TaskSettingsPanel({ draft, onDraftChange }: TaskSettingsPanelPro
   function handleToggleSubscription(workerIndex: number, statusKey: string, enabled: boolean) {
     onDraftChange((prev) => {
       const workers = prev.workers.map((worker, index) => {
+        if (index !== workerIndex) return worker
         const subscriptions = (worker.subscriptions ?? []).filter((s) => s !== statusKey)
-        if (enabled && index === workerIndex) {
+        if (enabled) {
           return { ...worker, subscriptions: [...subscriptions, statusKey] }
         }
         return { ...worker, subscriptions }
@@ -345,6 +429,7 @@ export function TaskSettingsPanel({ draft, onDraftChange }: TaskSettingsPanelPro
                 <SortableStatusRow
                   key={status.key}
                   status={status}
+                  allStatuses={statuses}
                   onUpdate={(updates) => handleUpdateStatus(index, updates)}
                   onDelete={() => handleDeleteStatus(index)}
                   isDuplicateKey={(keyCount.get(status.key) ?? 0) > 1}

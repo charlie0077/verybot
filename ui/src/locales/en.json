@@ -365,7 +365,13 @@
     "statusLabel": "Label",
     "statusColor": "Color",
     "subscriptionMatrix": "Status Subscriptions",
-    "duplicateStatusKey": "Duplicate status key"
+    "duplicateStatusKey": "Duplicate status key",
+    "consensus": "Consensus",
+    "consensusNone": "None (single agent)",
+    "consensusUnanimous": "Unanimous (all vote)",
+    "disagreementTransition": "On disagreement →",
+    "consensusHelp": "All subscribed agents must vote. Unanimous agreement transitions to the voted status. Agents that finish without voting abstain.",
+    "selectStatus": "Select status"
   },
   "promptTemplates": {
     "title": "Prompt Templates",

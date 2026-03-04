@@ -7,6 +7,8 @@ export interface SubscribedTaskContext {
   title: string;
   currentStatus: string;
   availableStatusKeys: string[];
+  /** Consensus mode for this status: "none" (single-agent, no consensus) or "unanimous" (multi-agent vote). */
+  consensusMode?: "none" | "unanimous";
 }
 
 export interface ContextInput {
@@ -189,6 +191,11 @@ function buildSubscribedTaskSection(task: SubscribedTaskContext): string {
   const availableStatuses = task.availableStatusKeys.length > 0
     ? task.availableStatusKeys.join(", ")
     : "(none)";
+  const consensusInstructions = task.consensusMode === "unanimous"
+    ? `\n\nThis status uses UNANIMOUS consensus. Multiple agents work on this task simultaneously.
+Use task_vote to submit your recommended next status when done.
+You may also use task_update to change status — it will record your vote and check consensus automatically.`
+    : "";
   return `## Subscribed Task Mode
 You are executing a claimed task in a non-interactive worker run.
 Claimed task:
@@ -197,7 +204,7 @@ Claimed task:
 - title: ${task.title}
 - current status: ${task.currentStatus}
 Available status keys:
-- ${availableStatuses}`;
+- ${availableStatuses}${consensusInstructions}`;
 }
 
 function buildTeamContextSection(

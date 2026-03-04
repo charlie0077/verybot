@@ -508,49 +508,65 @@ export class TeamStore {
 
   /**
    * Find claimable tasks by joining tasks, agent_subscriptions, and agents tables.
-   * Used by TaskSubscriberManager to find task/agent matches without raw DB access.
-   * Enforces concurrency at query time from live claim counts.
+   * Uses task_claims for dedup (no existing claim for agent+task+status) and concurrency.
    */
   findClaimableTasks(limit: number): {
-    taskId: string; agentId: string; teamId: string;
+    taskId: string; taskStatus: string; agentId: string; teamId: string;
     agentName: string; model: string; concurrency: number;
   }[] {
     const rows = this.db.prepare(`
-      SELECT t.id AS task_id, s.agent_id, a.team_id, a.name AS agent_name, a.model, a.concurrency
+      SELECT t.id AS task_id, t.status AS task_status, s.agent_id, a.team_id, a.name AS agent_name, a.model, a.concurrency
       FROM tasks t
       JOIN agent_subscriptions s ON s.task_status = t.status
       JOIN agents a ON a.id = s.agent_id
-      WHERE t.claimed_by IS NULL
+      LEFT JOIN task_claims c
+        ON c.task_id = t.id
+        AND c.agent_id = s.agent_id
+        AND c.task_status = t.status
+      WHERE c.task_id IS NULL
         AND t.needs_human_review = 0
         AND t.team_id = a.team_id
         AND (t.assignee IS NULL OR t.assignee = s.agent_id)
         AND (
-          t.last_processed_by IS NULL
-          OR t.last_processed_for_updated_at IS NULL
-          OR t.last_processed_by != s.agent_id
-          OR t.last_processed_for_updated_at != t.updated_at
-        )
-        AND (
           SELECT COUNT(*)
-          FROM tasks claimed
-          WHERE claimed.claimed_by = s.agent_id
+          FROM task_claims active
+          WHERE active.agent_id = s.agent_id AND active.completed_at IS NULL
         ) < a.concurrency
       ORDER BY
         CASE WHEN t.assignee = s.agent_id THEN 0 ELSE 1 END,
+        CASE WHEN EXISTS(
+          SELECT 1 FROM task_claims ac
+          WHERE ac.task_id = t.id AND ac.task_status = t.status
+            AND ac.completed_at IS NULL AND ac.agent_id != s.agent_id
+        ) THEN 1 ELSE 0 END,
         t.created_at ASC
       LIMIT ?
     `).all(limit) as {
-      task_id: string; agent_id: string; team_id: string;
+      task_id: string; task_status: string; agent_id: string; team_id: string;
       agent_name: string; model: string; concurrency: number;
     }[];
     return rows.map((r) => ({
       taskId: r.task_id,
+      taskStatus: r.task_status,
       agentId: r.agent_id,
       teamId: r.team_id,
       agentName: r.agent_name,
       model: r.model,
       concurrency: r.concurrency,
     }));
+  }
+
+  /**
+   * Get all agent IDs subscribed to a given task status within a team.
+   */
+  getSubscribersForStatus(teamId: string, taskStatus: string): string[] {
+    const rows = this.db.prepare(
+      `SELECT s.agent_id
+       FROM agent_subscriptions s
+       JOIN agents a ON a.id = s.agent_id
+       WHERE s.task_status = ? AND a.team_id = ?`,
+    ).all(taskStatus, teamId) as { agent_id: string }[];
+    return rows.map((r) => r.agent_id);
   }
 
   /**

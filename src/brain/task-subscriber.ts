@@ -1,13 +1,14 @@
 import type { ToolSet } from "ai";
 import type { Config } from "../config.js";
-import type { TaskStore } from "../tasks/store.js";
+import { type TaskStore, resolveConsensusBarrier } from "../tasks/store.js";
 import type { TeamStore } from "../teams/store.js";
 import type { MemoryStore } from "../memory/store.js";
 import type { EmbeddingProvider } from "../memory/embedding.js";
 import type { SkillManager } from "../skills/loader.js";
 import type { BrowserConfig } from "../computer/browser/manager.js";
 import type { Task, TaskStatusConfig } from "../tasks/types.js";
-import { DEFAULT_TASK_STATUSES } from "../tasks/types.js";
+import type { CreateTaskToolsOptions } from "../tools/tasks.js";
+import { resolveStatuses } from "../tasks/types.js";
 import { Session } from "./session.js";
 import { SessionStore } from "./session-store.js";
 import { buildSystemPrompt } from "./context.js";
@@ -26,13 +27,19 @@ import { logger } from "../logger.js";
 import { buildUserMessageContent } from "./user-content.js";
 
 /** Poll interval for checking subscribed tasks. */
-const POLL_INTERVAL_MS = 5_000;
+const POLL_INTERVAL_MS = 1_000;
 /** Default max steps for subscription workers. */
 const DEFAULT_WORKER_MAX_STEPS = 20;
 /** Claims older than this are considered stale and released (30 minutes). */
 const STALE_CLAIM_TIMEOUT_MS = 30 * 60 * 1_000;
-/** Max candidates to consider per poll tick. */
-const CLAIMABLE_CANDIDATE_LIMIT = 20;
+/**
+ * Max candidates to consider per poll tick.
+ * Sized generously because exclusively-claimed tasks (consensus="none") cannot
+ * be re-claimed but still appear in results, consuming window slots.
+ * The SQL ORDER BY prioritizes unclaimed tasks first, so a large limit
+ * only matters when many exclusive tasks crowd the window.
+ */
+const CLAIMABLE_CANDIDATE_LIMIT = 200;
 /** Safety cap: max claims per single poll tick to prevent runaway. */
 const MAX_CLAIMS_PER_TICK = 50;
 
@@ -123,11 +130,11 @@ export class TaskSubscriberManager {
 
   /**
    * Find a claimable task and atomically claim it via the store.
-   * Uses TeamStore.findClaimableTasks() for cross-table query,
-   * then TaskStore.claimTask() for atomic claim.
+   * Uses TeamStore.findClaimableTasks() for cross-table query (uses task_claims for dedup/concurrency),
+   * then TaskStore.claimTaskById() for atomic claim.
    */
   private findAndClaim(): ClaimResult | null {
-    // Compute busy agents in-memory (not DB-level)
+    // In-memory filter: skip agents at capacity in activeRuns (defense-in-depth)
     const fullAgentIds = new Set<string>();
     for (const [agentId, tasks] of this.activeRuns) {
       const agent = this.deps.teamStore.getAgentById(agentId);
@@ -135,24 +142,36 @@ export class TaskSubscriberManager {
       if (tasks.size >= limit) fullAgentIds.add(agentId);
     }
 
-    // Query candidates via store method (small result set)
+    // Query candidates (already filtered by task_claims in DB query)
     const candidates = this.deps.teamStore.findClaimableTasks(CLAIMABLE_CANDIDATE_LIMIT);
 
-    // Find first candidate whose agent isn't at capacity
-    const match = candidates.find((c) => !fullAgentIds.has(c.agentId));
-    if (!match) return null;
+    // Try each candidate until one is successfully claimed
+    for (const match of candidates) {
+      if (fullAgentIds.has(match.agentId)) continue;
 
-    // Claim atomically via store
-    const task = this.deps.taskStore.claimTaskById(match.taskId, match.agentId);
-    if (!task) return null;
+      // Determine exclusivity based on consensus mode
+      const matchTeam = this.deps.teamStore.getTeamById(match.teamId);
+      if (!matchTeam) continue; // team deleted between query and claim
+      const matchStatusConfigs = resolveStatuses(matchTeam.statuses);
+      const matchStatusConfig = matchStatusConfigs.find((s) => s.key === match.taskStatus);
+      const rawConsensus = matchStatusConfig?.consensus;
+      // Normalize legacy "any" → "none" at runtime (validateStatusConfigs only normalizes on write)
+      const normalizedConsensus: "none" | "unanimous" = rawConsensus === "unanimous" ? "unanimous" : "none";
+      const exclusive = normalizedConsensus === "none";
 
-    return {
-      agentId: match.agentId,
-      teamId: match.teamId,
-      agentName: match.agentName,
-      model: match.model,
-      task,
-    };
+      // Claim atomically via store (writes to both tasks.claimed_by and task_claims)
+      const task = this.deps.taskStore.claimTaskById(match.taskId, match.agentId, exclusive);
+      if (!task) continue; // claim failed (race condition), try next candidate
+
+      return {
+        agentId: match.agentId,
+        teamId: match.teamId,
+        agentName: match.agentName,
+        model: match.model,
+        task,
+      };
+    }
+    return null;
   }
 
   /**
@@ -211,16 +230,19 @@ export class TaskSubscriberManager {
       // Task tools scoped to the task's team, with team's custom statuses
       const team = this.deps.teamStore.getTeamById(task.teamId);
       if (team?.name) teamName = team.name;
-      const configuredStatuses: TaskStatusConfig[] =
-        team?.statuses && team.statuses.length > 0 ? team.statuses : DEFAULT_TASK_STATUSES;
-      const taskTools = createTaskTools(this.deps.taskStore, task.teamId, configuredStatuses, {
+      const configuredStatuses = resolveStatuses(team?.statuses);
+      const taskToolOptions: CreateTaskToolsOptions = {
         clearClaimOnStatusChange: false,
         requireClaimedByForStatusChange: agentId,
         updatedBy: agentId,
-      });
+        teamStore: this.deps.teamStore,
+        agentName: agentRow.name,
+      };
+      const taskTools = createTaskTools(this.deps.taskStore, task.teamId, configuredStatuses, taskToolOptions);
       Object.assign(workerTools, this.filterToolSetByAllowlist(taskTools, agentRow.tools));
 
       // 4. System prompt (task-specific mode for subscribed workers)
+      const currentStatusConfig = configuredStatuses.find((s) => s.key === task.status);
       const system = buildSystemPrompt({
         identity: agentRow.identity,
         modelId,
@@ -232,6 +254,7 @@ export class TaskSubscriberManager {
           title: task.title,
           currentStatus: task.status,
           availableStatusKeys: configuredStatuses.map((status) => status.key),
+          consensusMode: currentStatusConfig?.consensus,
         },
       });
 
@@ -335,10 +358,39 @@ export class TaskSubscriberManager {
         subscription: { agentId, agentName, taskId: task.id, status: "failed", error },
       });
     } finally {
-      // Finalize only if this worker still owns the claim:
-      // mark processed for current task version and release claim atomically.
-      const finalized = this.deps.taskStore.finalizeClaimedTaskRun(task.id, agentId);
-      if (finalized) this.emitTaskUpdated(task.id);
+      // Use the original claim-time status, not the current status.
+      // If consensus resolved during the run, the task has already transitioned
+      // and claims for the old round were cleared. Using the current (new) status
+      // would interfere with a new round.
+      const claimStatus = task.status;
+
+      const team = this.deps.teamStore.getTeamById(task.teamId);
+      const statusConfigs = resolveStatuses(team?.statuses);
+      const statusConfig = statusConfigs.find((s) => s.key === claimStatus);
+      const rawConsensus = statusConfig?.consensus;
+      const consensus = rawConsensus === "unanimous" ? "unanimous" : "none";
+
+      if (consensus !== "none") {
+        // Multi-agent: mark claim completed so concurrency slot is freed.
+        // If agent voted during the run, completeClaim already set completed_at
+        // (this call is a no-op). If agent didn't vote, we mark it completed
+        // without a vote so concurrency isn't blocked for 30 min.
+        const completed = this.deps.taskStore.completeClaim(task.id, agentId, claimStatus, null);
+        if (completed) {
+          // Re-check barrier — this abstention may be the last completion needed.
+          const subscribers = this.deps.teamStore.getSubscribersForStatus(task.teamId, claimStatus);
+          resolveConsensusBarrier(
+            this.deps.taskStore, task.id, claimStatus,
+            subscribers, consensus, statusConfig?.disagreementTransition,
+          );
+        }
+        this.emitTaskUpdated(task.id);
+      } else {
+        // Single-agent ("none"): finalize immediately (mark processed + release claim)
+        // so the task can be retried or picked up again.
+        const finalized = this.deps.taskStore.finalizeClaimedTaskRun(task.id, agentId);
+        if (finalized) this.emitTaskUpdated(task.id);
+      }
 
       activeRunsForAgent?.delete(task.id);
       if (activeRunsForAgent?.size === 0) this.activeRuns.delete(agentId);

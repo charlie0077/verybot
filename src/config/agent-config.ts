@@ -30,6 +30,10 @@ export interface TaskStatusConfig {
   label: string;
   /** Hex color, e.g. "#3b82f6". */
   color: string;
+  /** Consensus mode: "none" (single agent, no consensus, default) or "unanimous" (all must vote). */
+  consensus?: "none" | "unanimous";
+  /** Status to transition to when agents disagree. Required when consensus = "unanimous". */
+  disagreementTransition?: string;
 }
 
 export interface TeamConfig {

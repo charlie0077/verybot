@@ -47,11 +47,18 @@ function resolveDoneStatus(
   return DEFAULT_DONE_STATUS;
 }
 
-export function taskMethods(taskStore: TaskStore, _teamStore?: TeamStore | null) {
+export function taskMethods(taskStore: TaskStore, teamStore?: TeamStore | null) {
   return {
     "tasks.list": async (params: unknown) => {
       const filter = ListTasksSchema.parse(params ?? {});
-      return { tasks: taskStore.list(filter) };
+      const tasks = taskStore.list(filter);
+      // Attach claims to each task
+      const taskIds = tasks.map((t) => t.id);
+      const claimsMap = taskStore.getClaimsForTasks(taskIds);
+      for (const task of tasks) {
+        task.claims = claimsMap.get(task.id) ?? [];
+      }
+      return { tasks };
     },
 
     "tasks.create": async (params: unknown) => {
@@ -63,10 +70,27 @@ export function taskMethods(taskStore: TaskStore, _teamStore?: TeamStore | null)
 
     "tasks.update": async (params: unknown) => {
       const { id, ...updates } = UpdateTaskSchema.parse(params);
+      const existing = taskStore.getById(id);
+      if (!existing) throw new Error(`Task not found: ${id}`);
+
+      // update() handles claim cleanup internally (clearClaimOnStatusChange defaults to true)
+      const statusChanged = updates.status !== undefined && updates.status !== existing.status;
       const task = taskStore.update(id, updates, { updatedBy: "user" });
       if (!task) throw new Error(`Task not found: ${id}`);
-      emit("taskChange", { action: "updated", task });
-      return { task };
+
+      // Human override: add consensus override comment before emitting event
+      let finalTask = task;
+      if (statusChanged && teamStore) {
+        const team = teamStore.getTeamById(existing.teamId);
+        const statusConfig = team?.statuses?.find((s) => s.key === existing.status);
+        if (statusConfig?.consensus === "unanimous") {
+          taskStore.addComment(id, `[Override] Human moved task from "${existing.status}" to "${updates.status}" — skipped consensus`, { actor: "system" });
+          // Re-read to pick up audit changes from addComment
+          finalTask = taskStore.getById(id) ?? task;
+        }
+      }
+      emit("taskChange", { action: "updated", task: finalTask });
+      return { task: finalTask };
     },
 
     "tasks.delete": async (params: unknown) => {

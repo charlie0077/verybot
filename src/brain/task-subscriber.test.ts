@@ -27,17 +27,17 @@ vi.mock("../tasks/inline-attachment-content.js", () => ({
 describe("TaskSubscriberManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getModel).mockReturnValue({} as Parameters<typeof runLoop>[0]["model"]);
-    vi.mocked(adaptTools).mockResolvedValue({
+    (getModel as ReturnType<typeof vi.fn>).mockReturnValue({} as Parameters<typeof runLoop>[0]["model"]);
+    (adaptTools as ReturnType<typeof vi.fn>).mockResolvedValue({
       model: {} as Parameters<typeof runLoop>[0]["model"],
       tools: {} as ToolSet,
     });
-    vi.mocked(runLoop).mockResolvedValue({
+    (runLoop as ReturnType<typeof vi.fn>).mockResolvedValue({
       text: "done",
       responseMessages: [],
       assistantContent: null,
     });
-    vi.mocked(resolveInlineAttachmentContent).mockResolvedValue({
+    (resolveInlineAttachmentContent as ReturnType<typeof vi.fn>).mockResolvedValue({
       normalizedText: "Remove status\n\n[image attached]",
       imageDataUrls: ["data:image/png;base64,YWJj"],
     });
@@ -131,7 +131,7 @@ describe("TaskSubscriberManager", () => {
       task: claimedTask,
     });
 
-    const runLoopCall = vi.mocked(runLoop).mock.calls[0]?.[0];
+    const runLoopCall = (runLoop as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
     expect(runLoopCall).toBeDefined();
     const firstMessage = runLoopCall?.messages[0];
     expect(firstMessage?.role).toBe("user");
@@ -151,7 +151,7 @@ describe("TaskSubscriberManager", () => {
       normalizedText: string;
       imageDataUrls: string[];
     }>(() => undefined);
-    vi.mocked(resolveInlineAttachmentContent).mockImplementation(() => unresolvedAttachmentResolution);
+    (resolveInlineAttachmentContent as ReturnType<typeof vi.fn>).mockImplementation(() => unresolvedAttachmentResolution);
 
     const claimableTasks = new Map<string, Task>([
       [
@@ -196,7 +196,7 @@ describe("TaskSubscriberManager", () => {
       ],
     ]);
 
-    const claimTaskById = vi.fn((taskId: string, claimedBy: string) => {
+    const claimTaskById = vi.fn((taskId: string, claimedBy: string, _exclusive?: boolean) => {
       const task = claimableTasks.get(taskId);
       if (!task) return null;
       claimableTasks.delete(taskId);
@@ -263,6 +263,7 @@ describe("TaskSubscriberManager", () => {
         findClaimableTasks: vi.fn(() =>
           Array.from(claimableTasks.keys()).map((taskId) => ({
             taskId,
+            taskStatus: "new_status_2",
             teamId,
             agentId,
             agentName: "Planner",
@@ -295,6 +296,6 @@ describe("TaskSubscriberManager", () => {
     (manager as unknown as { poll: () => void }).poll();
 
     expect(claimTaskById).toHaveBeenCalledTimes(1);
-    expect(claimTaskById).toHaveBeenCalledWith(taskIdOne, agentId);
+    expect(claimTaskById).toHaveBeenCalledWith(taskIdOne, agentId, true);
   });
 });

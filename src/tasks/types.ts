@@ -41,6 +41,11 @@ export const DEFAULT_TASK_STATUSES: TaskStatusConfig[] = [
   { key: "done", label: "Done", color: "#22c55e" },
 ];
 
+/** Resolve effective statuses: use provided list if non-empty, otherwise defaults. */
+export function resolveStatuses(statuses?: TaskStatusConfig[] | null): TaskStatusConfig[] {
+  return statuses && statuses.length > 0 ? statuses : DEFAULT_TASK_STATUSES;
+}
+
 export interface TaskAttachment {
   id: string;
   name: string;
@@ -59,6 +64,16 @@ export interface TaskComment {
   updatedAt: number;
 }
 
+export interface TaskClaim {
+  taskId: string;
+  agentId: string;
+  taskStatus: string;
+  claimedAt: number;
+  completedAt: number | null;
+  votedStatus: string | null;
+  result: string | null;
+}
+
 export interface Task {
   id: string;
   teamId: string;
@@ -71,10 +86,12 @@ export interface Task {
   attachments: TaskAttachment[];
   /** True when the task is waiting on a human to review or act. */
   needsHumanReview: boolean;
-  /** Agent ID that claimed this task for pull-based execution. */
+  /** @deprecated Use claims from task_claims table instead. Kept for backwards compat. */
   claimedBy: string | null;
-  /** Timestamp when the task was claimed. */
+  /** @deprecated Use claims from task_claims table instead. Kept for backwards compat. */
   claimedAt: number | null;
+  /** Active claims for this task (populated when needed, e.g. API responses). */
+  claims?: TaskClaim[];
   /** Last actor that updated this task (user, orchestrator, worker, system). */
   updatedBy: string | null;
   createdAt: number;
