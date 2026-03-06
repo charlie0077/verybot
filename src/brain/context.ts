@@ -6,7 +6,8 @@ export interface SubscribedTaskContext {
   teamId: string;
   title: string;
   currentStatus: string;
-  availableStatusKeys: string[];
+  currentStatusLabel?: string;
+  availableStatuses: { key: string; label: string }[];
   /** Consensus mode for this status: "none" (single-agent, no consensus) or "unanimous" (multi-agent vote). */
   consensusMode?: "none" | "unanimous";
 }
@@ -188,9 +189,12 @@ If you are about to ask a choice question, output only \`\`\`question\`\`\` bloc
 }
 
 function buildSubscribedTaskSection(task: SubscribedTaskContext): string {
-  const availableStatuses = task.availableStatusKeys.length > 0
-    ? task.availableStatusKeys.join(", ")
+  const availableStatuses = task.availableStatuses.length > 0
+    ? task.availableStatuses.map((s) => s.label !== s.key ? `${s.key} ("${s.label}")` : s.key).join(", ")
     : "(none)";
+  const currentStatusDisplay = task.currentStatusLabel && task.currentStatusLabel !== task.currentStatus
+    ? `${task.currentStatus} ("${task.currentStatusLabel}")`
+    : task.currentStatus;
   const consensusInstructions = task.consensusMode === "unanimous"
     ? `\n\nThis status uses UNANIMOUS consensus. Multiple agents work on this task simultaneously.
 Use task_vote to submit your recommended next status when done.
@@ -202,8 +206,8 @@ Claimed task:
 - id: ${task.id}
 - team: ${task.teamId}
 - title: ${task.title}
-- current status: ${task.currentStatus}
-Available status keys:
+- current status: ${currentStatusDisplay}
+Available statuses (use the key when calling tools):
 - ${availableStatuses}${consensusInstructions}`;
 }
 

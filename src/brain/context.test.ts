@@ -53,7 +53,13 @@ describe("buildSystemPrompt", () => {
         teamId: "frontend",
         title: "Fix codexcli reasoning label display",
         currentStatus: "todo",
-        availableStatusKeys: ["backlog", "todo", "in_progress", "done"],
+        currentStatusLabel: "Todo",
+        availableStatuses: [
+          { key: "backlog", label: "Backlog" },
+          { key: "todo", label: "Todo" },
+          { key: "in_progress", label: "In Progress" },
+          { key: "done", label: "Done" },
+        ],
       },
     });
 
@@ -61,9 +67,9 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("non-interactive worker run");
     expect(prompt).toContain("- id: 4");
     expect(prompt).toContain("- team: frontend");
-    expect(prompt).toContain("- current status: todo");
-    expect(prompt).toContain("Available status keys:");
-    expect(prompt).toContain("- backlog, todo, in_progress, done");
+    expect(prompt).toContain('- current status: todo ("Todo")');
+    expect(prompt).toContain("Available statuses (use the key when calling tools):");
+    expect(prompt).toContain('backlog ("Backlog"), todo ("Todo"), in_progress ("In Progress"), done ("Done")');
     expect(prompt).toContain("Quick Question Blocks");
     expect(prompt).toContain("```question");
     expect(prompt).toContain("title: Decision title");

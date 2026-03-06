@@ -163,8 +163,13 @@ export function createTaskTools(
     ? DEFAULT_CREATE_STATUS_KEY
     : configuredStatuses[0]!.key;
 
-  const createStatusDesc = createStatusKeys.join(", ");
-  const statusDesc = listAndUpdateStatusKeys.join(", ");
+  const createStatusDesc = configuredStatuses
+    .map((s) => s.label !== s.key ? `${s.key} ("${s.label}")` : s.key)
+    .join(", ");
+  const statusDesc = [
+    ...configuredStatuses.map((s) => s.label !== s.key ? `${s.key} ("${s.label}")` : s.key),
+    "archived",
+  ].join(", ");
   const createStatusEnum = z.enum(createStatusKeys as [string, ...string[]]);
   const statusEnum = z.enum(listAndUpdateStatusKeys as [string, ...string[]]);
   const commentContentSchema = z.string().trim().min(1).max(MAX_TASK_COMMENT_LENGTH);

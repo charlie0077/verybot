@@ -253,7 +253,8 @@ export class TaskSubscriberManager {
           teamId: task.teamId,
           title: task.title,
           currentStatus: task.status,
-          availableStatusKeys: configuredStatuses.map((status) => status.key),
+          currentStatusLabel: currentStatusConfig?.label,
+          availableStatuses: configuredStatuses.map((s) => ({ key: s.key, label: s.label })),
           consensusMode: currentStatusConfig?.consensus,
         },
       });
